@@ -1,0 +1,62 @@
+{
+    "feature_cols": [
+        "latitude",
+        "longitude",
+        "rainfall",
+        "temperature",
+        "humidity",
+        "river_discharge",
+        "water_level",
+        "elevation",
+        "population_density",
+        "infrastructure",
+        "historical_floods",
+        "land_cover_encoded",
+        "soil_type_encoded"
+    ],
+    "land_classes": [
+        "Agricultural",
+        "Desert",
+        "Forest",
+        "Urban",
+        "Water Body"
+    ],
+    "soil_classes": [
+        "Clay",
+        "Loam",
+        "Peat",
+        "Sandy",
+        "Silt"
+    ],
+    "metrics": {
+        "rf": {
+            "accuracy": 0.999,
+            "precision": 0.997867803837953,
+            "recall": 0.997867803837953,
+            "f1": 0.997867803837953,
+            "roc_auc": 0.9999874658618821
+        },
+        "xgb": {
+            "accuracy": 0.9995,
+            "precision": 0.997872340425532,
+            "recall": 1.0,
+            "f1": 0.9989350372736954,
+            "roc_auc": 0.9999999999999999
+        }
+    },
+    "feature_importance": {
+        "water_level": 0.3235968351364136,
+        "rainfall": 0.208845853805542,
+        "river_discharge": 0.16640959680080414,
+        "historical_floods": 0.10225356370210648,
+        "elevation": 0.10192929208278656,
+        "humidity": 0.04540794715285301,
+        "latitude": 0.010987753048539162,
+        "temperature": 0.01058200653642416,
+        "land_cover_encoded": 0.008659929037094116,
+        "longitude": 0.008323228918015957,
+        "population_density": 0.006305776536464691,
+        "soil_type_encoded": 0.0044305832125246525,
+        "infrastructure": 0.0022675616201013327
+    }
+}
