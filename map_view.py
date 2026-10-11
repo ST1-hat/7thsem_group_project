@@ -2,25 +2,28 @@
 map_view.py
 Interactive Geospatial Map generation module using Folium.
 Renders the primary target location with custom highlighting, pulsing risk halo,
-surrounding monitoring stations, topological contours, and risk overlays.
+surrounding monitoring stations, topological contours, relief shelters, and
+dynamic AI-computed safe evacuation routing corridors.
 """
 
 import folium
 from folium import plugins
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 def create_flood_map(
     target_info: Dict[str, Any],
     target_risk: Dict[str, Any],
     nearby_stations: List[Dict[str, Any]],
-    zoom_start: int = 11
+    evacuation_plan: Optional[Dict[str, Any]] = None,
+    zoom_start: int = 12
 ) -> folium.Map:
     """
     Constructs an interactive Folium map centered on the target location with:
     - Primary highlighted target marker with radar pulse ring
     - Nearby surrounding stations color-coded by flood risk
     - Risk buffer catchment zones
-    - Interactive tooltips & rich popup cards
+    - Designated high-elevation emergency relief shelters
+    - AI-computed safe evacuation corridors vs hazardous submerged roads
     - Topography & satellite map tile switches
     - Custom map legend
     """
@@ -48,8 +51,13 @@ def create_flood_map(
         name="Topography / Elevation (OpenTopoMap)"
     ).add_to(m)
 
+    # Feature Groups for toggling layers
+    fg_stations = folium.FeatureGroup(name="Regional Hydrology Stations", show=True).add_to(m)
+    fg_shelters = folium.FeatureGroup(name="Designated Relief Shelters", show=True).add_to(m)
+    fg_safe_route = folium.FeatureGroup(name="🛡️ AI Safe Evacuation Path", show=True).add_to(m)
+    fg_hazard_route = folium.FeatureGroup(name="⚠️ Submerged / Hazard Route", show=True).add_to(m)
+
     # 1. Primary Location: Target Pulsing Halo & Inundation Buffer
-    # Outer risk impact buffer
     folium.Circle(
         location=[center_lat, center_lon],
         radius=4500,  # 4.5 km buffer
@@ -61,7 +69,6 @@ def create_flood_map(
         tooltip=f"<b>Primary Monitoring Zone</b><br>Risk: {target_risk['category']} ({target_risk['risk_score']}%)"
     ).add_to(m)
 
-    # Inner core zone
     folium.Circle(
         location=[center_lat, center_lon],
         radius=1500,
@@ -72,7 +79,6 @@ def create_flood_map(
         fill_opacity=0.35
     ).add_to(m)
 
-    # Custom HTML popup for the primary target
     popup_html = f"""
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-width: 230px; padding: 6px;">
         <div style="background: {target_color}; color: white; padding: 6px 10px; border-radius: 6px; font-weight: bold; font-size: 14px; margin-bottom: 8px;">
@@ -90,7 +96,6 @@ def create_flood_map(
     </div>
     """
     
-    # Primary Marker
     folium.Marker(
         location=[center_lat, center_lon],
         popup=folium.Popup(popup_html, max_width=320),
@@ -108,28 +113,14 @@ def create_flood_map(
         st_color = st_risk.get("color_hex", "#3b82f6")
         st_score = st_risk.get("risk_score", 30.0)
 
-        # Connect station to center with subtle dashed line
         folium.PolyLine(
             locations=[[center_lat, center_lon], [st_lat, st_lon]],
             color="#94a3b8",
             weight=1.5,
             opacity=0.6,
             dash_array="5, 8"
-        ).add_to(m)
+        ).add_to(fg_stations)
 
-        # Station Circle
-        folium.CircleMarker(
-            location=[st_lat, st_lon],
-            radius=9,
-            color=st_color,
-            weight=2,
-            fill=True,
-            fill_color=st_color,
-            fill_opacity=0.75,
-            tooltip=f"📍 <b>{st_name}</b> ({st_dist} km)<br>Risk: <b>{st_score}%</b>"
-        ).add_to(m)
-
-        # Station Popup
         st_popup = f"""
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-width: 200px; padding: 4px;">
             <div style="background: {st_color}; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-bottom: 6px;">
@@ -171,46 +162,153 @@ def create_flood_map(
                 icon_size=(22, 22),
                 icon_anchor=(11, 11)
             )
-        ).add_to(m)
+        ).add_to(fg_stations)
 
-    # 3. Add Custom Floating Map Legend
+    # 3. Add Designated Emergency Relief Shelters & Evacuation Routes
+    if evacuation_plan:
+        shelters = evacuation_plan.get("candidate_shelters", [])
+        active_shelter = evacuation_plan.get("target_shelter", {})
+        active_shelter_id = active_shelter.get("id")
+
+        for sh in shelters:
+            is_active = (sh.get("id") == active_shelter_id)
+            sh_lat = sh["latitude"]
+            sh_lon = sh["longitude"]
+            sh_elev = sh["elevation_m"]
+            sh_beds = sh["remaining_beds"]
+            sh_cap = sh["capacity"]
+            
+            shelter_html = f"""
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-width: 250px; padding: 6px;">
+                <div style="background: #059669; color: white; padding: 5px 8px; border-radius: 5px; font-weight: bold; font-size: 12px; margin-bottom: 6px;">
+                    🛡️ DESIGNATED RELIEF CAMP
+                </div>
+                <h4 style="margin: 0 0 4px 0; color: #064e3b; font-size: 14px;">{sh['name']}</h4>
+                <div style="font-size: 11px; color: #047857; font-weight: bold; margin-bottom: 6px;">
+                    Elevation: {sh_elev} m MSL (+{(sh_elev - target_info.get('elevation', 50)):.1f}m High Ground)
+                </div>
+                <div style="font-size: 12px; color: #334155; line-height: 1.5;">
+                    <b>Capacity:</b> {sh_cap} beds ({sh_beds} available)<br>
+                    <b>Medical:</b> {sh['medical_support']}<br>
+                    <b>Supplies:</b> {sh['supplies']}<br>
+                    <b>Contact:</b> {sh['contact']}
+                </div>
+            </div>
+            """
+
+            folium.Marker(
+                location=[sh_lat, sh_lon],
+                popup=folium.Popup(shelter_html, max_width=300),
+                tooltip=f"🛡️ <b>{sh['name']}</b> ({sh_beds} beds free, Elev: {sh_elev}m)",
+                icon=folium.Icon(color="green" if not is_active else "darkgreen", icon="shield" if not is_active else "home", prefix="fa")
+            ).add_to(fg_shelters)
+
+        # 4. Render Evacuation Routes
+        safe_r = evacuation_plan.get("safe_route", {})
+        direct_r = evacuation_plan.get("direct_route", {})
+
+        # Submerged Direct Route (Hazardous)
+        if direct_r.get("found") and direct_r.get("coordinates"):
+            folium.PolyLine(
+                locations=direct_r["coordinates"],
+                color="#dc2626",
+                weight=3.5,
+                opacity=0.7,
+                dash_array="8, 8",
+                tooltip=f"⚠️ <b>Direct Route (HAZARDOUS)</b><br>Max Submergence: <b>{direct_r.get('max_water_depth_m', 0)}m</b> ({direct_r.get('total_distance_km')} km)"
+            ).add_to(fg_hazard_route)
+
+            # Submerged warning marker along direct path if water depth > 0.3m
+            if direct_r.get("max_water_depth_m", 0) > 0.3:
+                # Mark intermediate submerged point
+                sub_pt = direct_r["coordinates"][1]
+                folium.CircleMarker(
+                    location=sub_pt,
+                    radius=7,
+                    color="#dc2626",
+                    fill=True,
+                    fill_color="#fee2e2",
+                    fill_opacity=0.9,
+                    tooltip=f"⛔ <b>Road Submerged:</b> {direct_r['max_water_depth_m']}m water depth!"
+                ).add_to(fg_hazard_route)
+
+        # AI-Optimized Safe Evacuation Route (Clear & Elevated)
+        if safe_r.get("found") and safe_r.get("coordinates"):
+            # Solid glowing route corridor
+            folium.PolyLine(
+                locations=safe_r["coordinates"],
+                color="#059669",
+                weight=6,
+                opacity=0.85,
+                tooltip=f"🛡️ <b>AI Safe Evacuation Corridor</b><br>100% Passable | Dist: {safe_r.get('total_distance_km')} km | ETA: {safe_r.get('transit_time_mins')} min"
+            ).add_to(fg_safe_route)
+
+            # Glowing inner core
+            folium.PolyLine(
+                locations=safe_r["coordinates"],
+                color="#34d399",
+                weight=2.5,
+                opacity=0.95
+            ).add_to(fg_safe_route)
+
+            # Waypoint markers along safe route
+            for i, coord in enumerate(safe_r["coordinates"][1:-1]):
+                folium.CircleMarker(
+                    location=coord,
+                    radius=5,
+                    color="#059669",
+                    weight=2,
+                    fill=True,
+                    fill_color="#ecfdf5",
+                    fill_opacity=1.0,
+                    tooltip=f"Waypoint {i+1}: Safe High-Elevation Ridge"
+                ).add_to(fg_safe_route)
+
+    # 5. Add Custom Floating Map Legend
     legend_html = """
     <div style="
         position: fixed;
         bottom: 30px;
         right: 30px;
         z-index: 1000;
-        background: rgba(255, 255, 255, 0.94);
+        background: rgba(255, 255, 255, 0.95);
         padding: 12px 16px;
         border-radius: 8px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.18);
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        font-size: 12px;
+        font-size: 11px;
         color: #1e293b;
         border: 1px solid #cbd5e1;
-        max-width: 220px;
+        max-width: 230px;
     ">
-        <div style="font-weight: bold; font-size: 13px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
-            🌊 Flood Risk Levels
+        <div style="font-weight: bold; font-size: 12px; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
+            🌊 Flood Operations Legend
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-            <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #22c55e; margin-right: 8px;"></span>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #22c55e; margin-right: 6px;"></span>
             <span><b>Low Risk</b> (&lt; 30%)</span>
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-            <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #eab308; margin-right: 8px;"></span>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #eab308; margin-right: 6px;"></span>
             <span><b>Moderate Risk</b> (30-60%)</span>
         </div>
-        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-            <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #f97316; margin-right: 8px;"></span>
-            <span><b>High Risk</b> (60-80%)</span>
-        </div>
-        <div style="display: flex; align-items: center; margin-bottom: 8px;">
-            <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #ef4444; margin-right: 8px;"></span>
+        <div style="display: flex; align-items: center; margin-bottom: 4px;">
+            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #ef4444; margin-right: 6px;"></span>
             <span><b>Critical / Flash</b> (&gt; 80%)</span>
         </div>
-        <div style="font-size: 10px; color: #64748b; border-top: 1px solid #f1f5f9; padding-top: 4px;">
-            ⭐ Highlighted = Selected Focus
+        <div style="border-top: 1px solid #f1f5f9; margin-top: 6px; padding-top: 6px;">
+            <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                <span style="display: inline-block; width: 16px; height: 4px; background: #059669; margin-right: 6px;"></span>
+                <span><b>AI Safe Evacuation Path</b></span>
+            </div>
+            <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                <span style="display: inline-block; width: 16px; height: 3px; border-top: 2px dashed #dc2626; margin-right: 6px;"></span>
+                <span><b>Submerged Road Hazard</b></span>
+            </div>
+            <div style="display: flex; align-items: center;">
+                <span style="display: inline-block; width: 10px; height: 10px; background: #059669; border-radius: 2px; margin-right: 6px;"></span>
+                <span><b>Relief Camp Shelter</b></span>
+            </div>
         </div>
     </div>
     """
